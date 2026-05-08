@@ -1,3 +1,4 @@
+import { getTranslations } from 'next-intl/server';
 import type { StockSentimentInsights } from '@/lib/actions/adanos.helpers';
 
 interface StockSentimentCardProps {
@@ -33,9 +34,20 @@ function getAlignmentClasses(alignment: string): string {
     return 'text-gray-300';
 }
 
-export default function StockSentimentCard({ insight }: StockSentimentCardProps) {
+export default async function StockSentimentCard({ insight }: StockSentimentCardProps) {
+    const t = await getTranslations('sentiment');
     if (!insight) {
-        return null;
+        return (
+            <section className="rounded-2xl border border-gray-800 bg-gray-950/40 p-5 backdrop-blur-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">
+                    {t('title')}
+                </p>
+                <h2 className="mt-2 text-xl font-semibold text-white">{t('empty')}</h2>
+                <p className="mt-2 text-sm text-gray-400">
+                    {t('emptyHint')}
+                </p>
+            </section>
+        );
     }
 
     return (
