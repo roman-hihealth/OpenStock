@@ -1,0 +1,46 @@
+{
+    "nav": {
+        "dashboard": "總覽",
+        "search": "搜尋",
+        "watchlist": "自選股",
+        "apiDocs": "API 文件"
+    },
+    "home": {
+        "marketOverview": "市場總覽",
+        "stockHeatmap": "台股熱圖"
+    },
+    "watchlist": {
+        "title": "自選股",
+        "subtitle": "追蹤你的口袋股，集中管理到價提醒。",
+        "empty": "尚未加入任何自選股",
+        "emptyHint": "新增股票來追蹤行情並設定到價提醒。",
+        "tableHeader": {
+            "company": "公司",
+            "symbol": "代號",
+            "price": "股價",
+            "change": "漲跌",
+            "marketCap": "市值",
+            "actions": "操作"
+        },
+        "alertsTitle": "到價提醒",
+        "alertsEmpty": "目前沒有啟用中的提醒，可從自選股新增。",
+        "alertTarget": "目標價",
+        "alertCondition": "條件",
+        "alertActiveUntil": "有效至 {date}",
+        "alertConfirmDelete": "確定要刪除這個提醒嗎？"
+    },
+    "sentiment": {
+        "title": "市場情緒",
+        "empty": "目前無資料",
+        "emptyHint": "Adanos 情緒分析目前僅覆蓋美股，台股 sentiment 待後續支援。"
+    },
+    "search": {
+        "addStock": "新增股票",
+        "placeholder": "搜尋股票...",
+        "loading": "載入中...",
+        "noResults": "找不到結果",
+        "noStocks": "目前沒有可用股票",
+        "popularStocks": "熱門股票",
+        "searchResults": "搜尋結果"
+    }
+}
