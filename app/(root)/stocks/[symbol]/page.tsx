@@ -1,6 +1,7 @@
 import TradingViewWidget from "@/components/TradingViewWidget";
 import WatchlistButton from "@/components/WatchlistButton";
 import StockSentimentCard from "@/components/stocks/StockSentimentCard";
+import TwFinancials from "@/components/financials/TwFinancials";
 import {
     SYMBOL_INFO_WIDGET_CONFIG,
     CANDLE_CHART_WIDGET_CONFIG,
@@ -15,9 +16,11 @@ import { headers } from 'next/headers';
 import { isStockInWatchlist } from '@/lib/actions/watchlist.actions';
 import { getStockSentimentInsights } from '@/lib/actions/adanos.actions';
 import { formatSymbolForTradingView } from '@/lib/utils';
+import { marketFromSymbol } from '@/lib/market/symbol';
 
 export default async function StockDetails({ params }: StockDetailsPageProps) {
     const { symbol } = await params;
+    const market = marketFromSymbol(symbol);
     const tvSymbol = formatSymbolForTradingView(symbol);
     const scriptUrl = `https://s3.tradingview.com/external-embedding/embed-widget-`;
 
@@ -27,7 +30,9 @@ export default async function StockDetails({ params }: StockDetailsPageProps) {
     const userId = session?.user?.id;
     const [isInWatchlist, sentimentInsights] = await Promise.all([
         userId ? isStockInWatchlist(userId, symbol) : Promise.resolve(false),
-        getStockSentimentInsights(symbol),
+        // Adanos has no TW coverage today; skip the call so we save a request
+        // and the card falls through to its empty-state.
+        market === 'TW' ? Promise.resolve(null) : getStockSentimentInsights(symbol),
     ]);
 
     return (
@@ -83,11 +88,15 @@ export default async function StockDetails({ params }: StockDetailsPageProps) {
                         height={440}
                     />
 
-                    <TradingViewWidget
-                        scriptUrl={`${scriptUrl}financials.js`}
-                        config={COMPANY_FINANCIALS_WIDGET_CONFIG(tvSymbol)}
-                        height={800}
-                    />
+                    {market === 'TW' ? (
+                        <TwFinancials symbol={symbol} />
+                    ) : (
+                        <TradingViewWidget
+                            scriptUrl={`${scriptUrl}financials.js`}
+                            config={COMPANY_FINANCIALS_WIDGET_CONFIG(tvSymbol)}
+                            height={800}
+                        />
+                    )}
                 </div>
             </section>
         </div>

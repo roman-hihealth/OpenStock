@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import type { Market } from '@/lib/market/types';
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -108,16 +109,19 @@ export const getChangeColorClass = (changePercent?: number) => {
     return changePercent > 0 ? 'text-green-500' : 'text-red-500';
 };
 
-export const formatPrice = (price: number) => {
+export const formatPrice = (price: number, currency: string = 'USD') => {
     return new Intl.NumberFormat('en-US', {
         style: 'currency',
-        currency: 'USD',
+        currency,
         minimumFractionDigits: 2,
     }).format(price);
 };
 
 // Alias for consistency
 export const formatCurrency = formatPrice;
+
+export const currencyForMarket = (market: Market): 'USD' | 'TWD' =>
+    market === 'TW' ? 'TWD' : 'USD';
 
 export function formatNumber(num: number): string {
     // If number is small (likely already in millions from Finnhub), multiply by 1M to get actual value
