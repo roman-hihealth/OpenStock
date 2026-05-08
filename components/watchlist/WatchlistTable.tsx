@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { ArrowUp, ArrowDown, Bell } from "lucide-react";
 import CreateAlertModal from "./CreateAlertModal";
 import WatchlistButton from "@/components/WatchlistButton";
@@ -17,6 +18,7 @@ interface WatchlistTableProps {
 
 export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTableProps) {
     const [stocks, setStocks] = useState(data);
+    const t = useTranslations('watchlist');
 
     useEffect(() => {
         // Initial set if prop changes
@@ -64,8 +66,8 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
     if (!stocks || stocks.length === 0) {
         return (
             <div className="text-center py-12 bg-gray-900/50 rounded-lg border border-gray-800">
-                <h3 className="text-xl font-medium text-gray-300 mb-2">Your watchlist is empty</h3>
-                <p className="text-gray-500 mb-6">Add stocks to track their performance and set alerts.</p>
+                <h3 className="text-xl font-medium text-gray-300 mb-2">{t('empty')}</h3>
+                <p className="text-gray-500 mb-6">{t('emptyHint')}</p>
             </div>
         );
     }
@@ -75,12 +77,12 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
             <table className="w-full text-left text-sm border-collapse">
                 <thead className="bg-white/5 text-gray-400 font-medium border-b border-white/10">
                     <tr>
-                        <th className="px-6 py-4 font-semibold tracking-wide">Company</th>
-                        <th className="px-6 py-4 font-semibold tracking-wide">Symbol</th>
-                        <th className="px-6 py-4 font-semibold tracking-wide">Price</th>
-                        <th className="px-6 py-4 font-semibold tracking-wide">Change</th>
-                        <th className="px-6 py-4 font-semibold tracking-wide">Market Cap</th>
-                        <th className="px-6 py-4 text-right font-semibold tracking-wide">Actions</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">{t('tableHeader.company')}</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">{t('tableHeader.symbol')}</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">{t('tableHeader.price')}</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">{t('tableHeader.change')}</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">{t('tableHeader.marketCap')}</th>
+                        <th className="px-6 py-4 text-right font-semibold tracking-wide">{t('tableHeader.actions')}</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
@@ -115,7 +117,7 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                                     </span>
                                 </td>
                                 <td className="px-6 py-4 text-white font-medium text-base tracking-tight">
-                                    {formatCurrency(stock.price)}
+                                    {formatCurrency(stock.price, stock.currency)}
                                 </td>
                                 <td className={`px-6 py-4 font-medium`}>
                                     <div className={`flex items-center w-fit px-2 py-1 rounded-md ${isPositive ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>

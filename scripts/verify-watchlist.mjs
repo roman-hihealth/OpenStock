@@ -2,7 +2,7 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import { addToWatchlist, removeFromWatchlist, getUserWatchlist, isStockInWatchlist } from '../lib/actions/watchlist.actions.js';
 import { createAlert, getUserAlerts } from '../lib/actions/alert.actions.js';
-import { getWatchlistData } from '../lib/actions/finnhub.actions.js';
+import { getWatchlistDataFor } from '../lib/actions/finnhub.actions.js';
 
 // Mock data
 const MOCK_USER_ID = 'verify-user-' + Date.now();
@@ -28,7 +28,7 @@ console.log('--- STARTING VERIFICATION ---');
 
 async function verifyFinnhub() {
     console.log('1. Testing Finnhub Quote...');
-    const data = await getWatchlistData([SYMBOL]);
+    const data = await getWatchlistDataFor('US', [SYMBOL]);
     console.log('Finnhub Data:', data);
     if (data.length > 0 && data[0].price > 0) {
         console.log('✅ Finnhub Quote Fetch Success');

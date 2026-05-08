@@ -3,7 +3,9 @@ import { NEWS_SUMMARY_EMAIL_PROMPT, PERSONALIZED_WELCOME_EMAIL_PROMPT } from "@/
 import { sendNewsSummaryEmail, sendWelcomeEmail } from "@/lib/nodemailer";
 import { getAllUsersForNewsEmail } from "@/lib/actions/user.actions";
 import { getWatchlistSymbolsByEmail } from "@/lib/actions/watchlist.actions";
-import { getNews } from "@/lib/actions/finnhub.actions";
+// getNews is loaded inline via dynamic import below; we use the explicit-market
+// entry (getNewsFor) because Inngest steps run outside a request scope and
+// cookies() would throw here.
 import { getFormattedTodayDate } from "@/lib/utils";
 import { callAIProviderWithFallback } from "@/lib/ai-provider";
 
@@ -58,8 +60,8 @@ export const sendWeeklyNewsSummary = inngest.createFunction(
     async ({ step }) => {
         // Step 1: Fetch General Market News
         const articles = await step.run('fetch-general-news', async () => {
-            const { getNews } = await import("@/lib/actions/finnhub.actions");
-            const news = await getNews();
+            const { getNewsFor } = await import("@/lib/actions/finnhub.actions");
+            const news = await getNewsFor('US');
             // Ideally getNews would accept range, but getting latest 10 is good for summary
             return (news || []).slice(0, 10);
         });
@@ -230,13 +232,14 @@ export const checkStockAlerts = inngest.createFunction(
 
         // Step 3: Fetch prices
         const prices = await step.run('fetch-prices', async () => {
-            const { getQuote } = await import("@/lib/actions/finnhub.actions");
+            const { getQuoteFor } = await import("@/lib/actions/finnhub.actions");
             const priceMap: Record<string, number> = {};
 
-            // Process in chunks to be safe
+            // Process in chunks to be safe; market hard-coded to US until alerts
+            // gain a market field (P0 step 3) and per-alert market dispatch (P3).
             for (const sym of symbols) {
                 try {
-                    const quote = await getQuote(sym as string);
+                    const quote = await getQuoteFor('US', sym as string);
                     if (quote && quote.c) {
                         priceMap[sym as string] = quote.c;
                     }

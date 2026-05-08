@@ -1,8 +1,9 @@
 'use server';
 
 import { connectToDatabase } from '@/database/mongoose';
-import { Alert, type IAlert } from '@/database/models/alert.model';
+import { Alert } from '@/database/models/alert.model';
 import { revalidatePath } from 'next/cache';
+import { getMarketFromCookie } from '@/lib/market/cookie';
 
 // Create a new alert
 export async function createAlert(params: {
@@ -12,9 +13,11 @@ export async function createAlert(params: {
     condition: 'ABOVE' | 'BELOW';
 }) {
     try {
+        const market = await getMarketFromCookie();
         await connectToDatabase();
         const newAlert = await Alert.create({
             ...params,
+            market,
             active: true,
             // expiresAt handled by default value in schema
         });
@@ -26,11 +29,12 @@ export async function createAlert(params: {
     }
 }
 
-// Get all alerts for a user
+// Get all alerts for a user (filtered by current market cookie)
 export async function getUserAlerts(userId: string) {
     try {
+        const market = await getMarketFromCookie();
         await connectToDatabase();
-        const alerts = await Alert.find({ userId }).sort({ createdAt: -1 });
+        const alerts = await Alert.find({ userId, market }).sort({ createdAt: -1 });
         return JSON.parse(JSON.stringify(alerts));
     } catch (error) {
         console.error('Error fetching alerts:', error);
