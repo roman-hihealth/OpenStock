@@ -4,11 +4,8 @@ import { fetchFinMind } from './finmind';
 import { getCustomSector } from '@/lib/market/tw-sector-taxonomy';
 import {
     getTwseDailySnapshot,
-    getTwseRealtimeQuotes,
     getTpexDailySnapshot,
-    type TwseDailyRow,
-    type TpexDailyRow,
-    type TwseQuote,
+    getTwseRealtimeQuotes,
 } from './twse';
 
 type FinMindStockInfoRow = {
@@ -54,74 +51,6 @@ function rocDateToIso(rocDate: string): string {
     return `${year}-${tail.slice(0, 2)}-${tail.slice(2, 4)}`;
 }
 
-// Fallback path: TWSE STOCK_DAY_ALL + TPEX daily close quotes.
-// Both update after market close; during trading hours shows previous session.
-// Each source is fetched independently so a single failure doesn't kill both.
-async function buildFromDailySnapshot(
-    universe: Map<string, FinMindStockInfoRow>
-): Promise<HeatmapDataset> {
-    const stocks: HeatmapStock[] = [];
-    let asOf = '';
-
-    // TWSE — openapi.twse.com.tw
-    try {
-        const snapshot = await getTwseDailySnapshot(900);
-        for (const row of snapshot) {
-            const tradeValue = parseFloat(row.TradeValue || '0');
-            if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
-            const close = parseFloat(row.ClosingPrice || '0');
-            const change = parseFloat(row.Change || '0');
-            if (!Number.isFinite(close) || close <= 0) continue;
-            const prevClose = close - change;
-            const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
-            const info = universe.get(row.Code);
-            stocks.push({
-                id: row.Code,
-                name: row.Name,
-                sector: getCustomSector(row.Code) ?? info?.industry_category ?? '其他',
-                value: tradeValue,
-                changePct,
-            });
-        }
-        if (snapshot[0]?.Date) asOf = rocDateToIso(snapshot[0].Date);
-    } catch (e) {
-        console.error('[tw-heatmap] STOCK_DAY_ALL fallback failed:', e);
-    }
-
-    // TPEX — www.tpex.org.tw (covers OTC stocks missing from STOCK_DAY_ALL)
-    try {
-        const tpexSnapshot = await getTpexDailySnapshot(900);
-        for (const row of tpexSnapshot) {
-            // Filter to known universe to exclude warrants, derivatives, etc.
-            if (!universe.has(row.SecuritiesCompanyCode)) continue;
-            const tradeValue = parseFloat(row.TransactionAmount || '0');
-            if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
-            const close = parseFloat(row.Close || '0');
-            const change = parseFloat(row.Change.trim() || '0');
-            if (!Number.isFinite(close) || close <= 0) continue;
-            const prevClose = close - change;
-            const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
-            const info = universe.get(row.SecuritiesCompanyCode);
-            stocks.push({
-                id: row.SecuritiesCompanyCode,
-                name: row.CompanyName,
-                sector: getCustomSector(row.SecuritiesCompanyCode) ?? info?.industry_category ?? '其他',
-                value: tradeValue,
-                changePct,
-            });
-        }
-        if (!asOf && tpexSnapshot[0]?.Date) asOf = rocDateToIso(tpexSnapshot[0].Date);
-    } catch (e) {
-        console.error('[tw-heatmap] TPEX daily fallback failed:', e);
-    }
-
-    if (stocks.length === 0) return { sectors: [], asOf: '' };
-    return {
-        sectors: groupBySector(stocks),
-        asOf,
-    };
-}
-
 function groupBySector(stocks: HeatmapStock[]): { name: string; stocks: HeatmapStock[] }[] {
     const bySector = new Map<string, HeatmapStock[]>();
     for (const s of stocks) {
@@ -148,45 +77,92 @@ export const getTwHeatmapDataset = cache(async (): Promise<HeatmapDataset> => {
         return { sectors: [], asOf: '' };
     }
 
-    // --- Primary: TWSE MIS (chunked, covers TSE + OTC) ---
+    // ── Step 1: daily snapshots as base layer (guaranteed full coverage) ──────
+    // TWSE STOCK_DAY_ALL + TPEX daily fetched in parallel. During trading hours
+    // these reflect the previous session; after close they reflect today's.
+    type BaseEntry = { name: string; changePct: number; tradeValue: number };
+    const baseMap = new Map<string, BaseEntry>();
+    let asOf = '';
+
+    const [twseResult, tpexResult] = await Promise.allSettled([
+        getTwseDailySnapshot(900),
+        getTpexDailySnapshot(900),
+    ]);
+
+    if (twseResult.status === 'fulfilled') {
+        for (const row of twseResult.value) {
+            const tradeValue = parseFloat(row.TradeValue || '0');
+            const close = parseFloat(row.ClosingPrice || '0');
+            const change = parseFloat(row.Change || '0');
+            if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
+            if (!Number.isFinite(close) || close <= 0) continue;
+            const prevClose = close - change;
+            const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
+            baseMap.set(row.Code, { name: row.Name, changePct, tradeValue });
+        }
+        if (twseResult.value[0]?.Date) asOf = rocDateToIso(twseResult.value[0].Date);
+    } else {
+        console.error('[tw-heatmap] STOCK_DAY_ALL failed:', twseResult.reason);
+    }
+
+    if (tpexResult.status === 'fulfilled') {
+        for (const row of tpexResult.value) {
+            if (!universe.has(row.SecuritiesCompanyCode)) continue; // skip warrants/derivatives
+            const tradeValue = parseFloat(row.TransactionAmount || '0');
+            const close = parseFloat(row.Close || '0');
+            const change = parseFloat(row.Change.trim() || '0');
+            if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
+            if (!Number.isFinite(close) || close <= 0) continue;
+            const prevClose = close - change;
+            const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
+            baseMap.set(row.SecuritiesCompanyCode, { name: row.CompanyName, changePct, tradeValue });
+        }
+        if (!asOf && tpexResult.value[0]?.Date) asOf = rocDateToIso(tpexResult.value[0].Date);
+    } else {
+        console.error('[tw-heatmap] TPEX daily failed:', tpexResult.reason);
+    }
+
+    if (baseMap.size === 0) return { sectors: [], asOf: '' };
+
+    // ── Step 2: overlay today's live changePct from MIS (best-effort) ────────
+    // MIS batch returns z="-" for many stocks; only update when isLive=true.
+    // Partial success is fine — daily data fills in the rest.
     const allSymbols: string[] = [];
     for (const row of universe.values()) {
         if (row.type === 'twse') allSymbols.push(`${row.stock_id}.TW`);
         else if (row.type === 'tpex') allSymbols.push(`${row.stock_id}.TWO`);
     }
 
-    let quotes: TwseQuote[] = [];
+    let hasLiveData = false;
     try {
-        quotes = await getTwseRealtimeQuotes(allSymbols);
+        const quotes = await getTwseRealtimeQuotes(allSymbols);
+        for (const q of quotes) {
+            if (q.isLive && baseMap.has(q.stockId)) {
+                const base = baseMap.get(q.stockId)!;
+                baseMap.set(q.stockId, { ...base, changePct: q.changePercent });
+                hasLiveData = true;
+            }
+        }
     } catch (e) {
-        console.error('[tw-heatmap] MIS fetch failed, falling back to daily:', e);
-        return buildFromDailySnapshot(universe);
+        console.warn('[tw-heatmap] MIS overlay failed, showing daily changePct:', e);
     }
 
-    if (quotes.length < allSymbols.length * 0.25) {
-        console.warn(
-            `[tw-heatmap] MIS returned ${quotes.length}/${allSymbols.length}; using daily fallback`
-        );
-        return buildFromDailySnapshot(universe);
-    }
-
+    // ── Step 3: build HeatmapStock list ──────────────────────────────────────
     const stocks: HeatmapStock[] = [];
-    for (const q of quotes) {
-        const tradeValue = q.volume * q.price * 1000;
-        if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
-        const info = universe.get(q.stockId);
-        const sector = getCustomSector(q.stockId) ?? info?.industry_category ?? '其他';
+    for (const [stockId, base] of baseMap) {
+        const info = universe.get(stockId);
+        const sector = getCustomSector(stockId) ?? info?.industry_category ?? '其他';
         stocks.push({
-            id: q.stockId,
-            name: q.name || info?.stock_name || q.stockId,
+            id: stockId,
+            name: base.name || info?.stock_name || stockId,
             sector,
-            value: tradeValue,
-            changePct: q.changePercent,
+            value: base.tradeValue,
+            changePct: base.changePct,
         });
     }
 
     return {
         sectors: groupBySector(stocks),
-        asOf: new Date().toISOString().split('T')[0],
+        asOf: hasLiveData ? new Date().toISOString().split('T')[0] : asOf,
     };
 });
