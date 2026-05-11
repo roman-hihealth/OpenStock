@@ -6,7 +6,9 @@ import { getFugleAllQuotes, type FugleQuote } from './fugle';
 import {
     getTwseDailySnapshot,
     getTwseRealtimeQuotes,
+    getTpexDailySnapshot,
     type TwseDailyRow,
+    type TpexDailyRow,
     type TwseQuote,
 } from './twse';
 
@@ -53,41 +55,71 @@ function rocDateToIso(rocDate: string): string {
     return `${year}-${tail.slice(0, 2)}-${tail.slice(2, 4)}`;
 }
 
-// Fallback path: TWSE OpenAPI STOCK_DAY_ALL. Only updates after market close,
-// so during trading hours we'll show the previous session — but at least the
-// heatmap renders when MIS is rate-limiting us. Returns empty on hard failure.
+// Fallback path: TWSE STOCK_DAY_ALL + TPEX daily close quotes.
+// Both update after market close; during trading hours shows previous session.
+// Each source is fetched independently so a single failure doesn't kill both.
 async function buildFromDailySnapshot(
     universe: Map<string, FinMindStockInfoRow>
 ): Promise<HeatmapDataset> {
-    let snapshot: TwseDailyRow[] = [];
+    const stocks: HeatmapStock[] = [];
+    let asOf = '';
+
+    // TWSE — openapi.twse.com.tw
     try {
-        snapshot = await getTwseDailySnapshot(900);
+        const snapshot = await getTwseDailySnapshot(900);
+        for (const row of snapshot) {
+            const tradeValue = parseFloat(row.TradeValue || '0');
+            if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
+            const close = parseFloat(row.ClosingPrice || '0');
+            const change = parseFloat(row.Change || '0');
+            if (!Number.isFinite(close) || close <= 0) continue;
+            const prevClose = close - change;
+            const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
+            const info = universe.get(row.Code);
+            stocks.push({
+                id: row.Code,
+                name: row.Name,
+                sector: getCustomSector(row.Code) ?? info?.industry_category ?? '其他',
+                value: tradeValue,
+                changePct,
+            });
+        }
+        if (snapshot[0]?.Date) asOf = rocDateToIso(snapshot[0].Date);
     } catch (e) {
         console.error('[tw-heatmap] STOCK_DAY_ALL fallback failed:', e);
-        return { sectors: [], asOf: '' };
     }
 
-    const stocks: HeatmapStock[] = [];
-    for (const row of snapshot) {
-        const tradeValue = parseFloat(row.TradeValue || '0');
-        if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
-        const close = parseFloat(row.ClosingPrice || '0');
-        const change = parseFloat(row.Change || '0');
-        if (!Number.isFinite(close) || close <= 0) continue;
-        const prevClose = close - change;
-        const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
-        const info = universe.get(row.Code);
-        stocks.push({
-            id: row.Code,
-            name: row.Name,
-            sector: getCustomSector(row.Code) ?? info?.industry_category ?? '其他',
-            value: tradeValue,
-            changePct,
-        });
+    // TPEX — www.tpex.org.tw (covers OTC stocks missing from STOCK_DAY_ALL)
+    try {
+        const tpexSnapshot = await getTpexDailySnapshot(900);
+        for (const row of tpexSnapshot) {
+            // Filter to known universe to exclude warrants, derivatives, etc.
+            if (!universe.has(row.SecuritiesCompanyCode)) continue;
+            const tradeValue = parseFloat(row.TransactionAmount || '0');
+            if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
+            const close = parseFloat(row.Close || '0');
+            const change = parseFloat(row.Change.trim() || '0');
+            if (!Number.isFinite(close) || close <= 0) continue;
+            const prevClose = close - change;
+            const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
+            const info = universe.get(row.SecuritiesCompanyCode);
+            stocks.push({
+                id: row.SecuritiesCompanyCode,
+                name: row.CompanyName,
+                sector: getCustomSector(row.SecuritiesCompanyCode) ?? info?.industry_category ?? '其他',
+                value: tradeValue,
+                changePct,
+            });
+        }
+        if (!asOf && tpexSnapshot[0]?.Date) asOf = rocDateToIso(tpexSnapshot[0].Date);
+    } catch (e) {
+        console.error('[tw-heatmap] TPEX daily fallback failed:', e);
     }
+
+    if (stocks.length === 0) return { sectors: [], asOf: '' };
     return {
         sectors: groupBySector(stocks),
-        asOf: rocDateToIso(snapshot[0]?.Date ?? ''),
+        asOf,
     };
 }
 

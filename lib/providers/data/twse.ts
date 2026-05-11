@@ -255,3 +255,37 @@ export async function getTwseDailySnapshot(revalidateSeconds = 1800): Promise<Tw
     const json = (await res.json()) as TwseDailyRow[];
     return Array.isArray(json) ? json : [];
 }
+
+// =============================================================================
+// TPEX OpenAPI daily snapshot
+// -----------------------------------------------------------------------------
+// Covers all OTC (上櫃) securities. Returns ~10k rows including warrants/
+// derivatives — callers should filter against the known universe.
+// =============================================================================
+
+export type TpexDailyRow = {
+    Date: string;                  // ROC date, e.g. "1150508"
+    SecuritiesCompanyCode: string; // stock id
+    CompanyName: string;
+    Close: string;
+    Change: string;                // may have trailing whitespace
+    Open: string;
+    High: string;
+    Low: string;
+    TradingShares: string;
+    TransactionAmount: string;     // NT$ trade value
+    TransactionNumber: string;
+};
+
+export async function getTpexDailySnapshot(revalidateSeconds = 1800): Promise<TpexDailyRow[]> {
+    const url = 'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes';
+    const res = await fetch(url, {
+        cache: 'force-cache',
+        next: { revalidate: revalidateSeconds },
+    });
+    if (!res.ok) {
+        throw new Error(`TPEX OpenAPI HTTP ${res.status}`);
+    }
+    const json = (await res.json()) as TpexDailyRow[];
+    return Array.isArray(json) ? json : [];
+}
