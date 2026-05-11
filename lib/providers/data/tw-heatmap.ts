@@ -2,6 +2,7 @@ import 'server-only';
 import { cache } from 'react';
 import { fetchFinMind } from './finmind';
 import { getCustomSector } from '@/lib/market/tw-sector-taxonomy';
+import { getFugleAllQuotes, type FugleQuote } from './fugle';
 import {
     getTwseDailySnapshot,
     getTwseRealtimeQuotes,
@@ -107,6 +108,26 @@ function groupBySector(stocks: HeatmapStock[]): { name: string; stocks: HeatmapS
         .map(({ name, stocks }) => ({ name, stocks }));
 }
 
+function buildStocksFromFugle(
+    quotes: FugleQuote[],
+    universe: Map<string, FinMindStockInfoRow>
+): HeatmapStock[] {
+    const stocks: HeatmapStock[] = [];
+    for (const q of quotes) {
+        if (!Number.isFinite(q.tradeValue) || q.tradeValue <= 0) continue;
+        const info = universe.get(q.stockId);
+        const sector = getCustomSector(q.stockId) ?? info?.industry_category ?? '其他';
+        stocks.push({
+            id: q.stockId,
+            name: q.name || info?.stock_name || q.stockId,
+            sector,
+            value: q.tradeValue,
+            changePct: q.changePercent,
+        });
+    }
+    return stocks;
+}
+
 export const getTwHeatmapDataset = cache(async (): Promise<HeatmapDataset> => {
     let universe = new Map<string, FinMindStockInfoRow>();
     try {
@@ -116,9 +137,21 @@ export const getTwHeatmapDataset = cache(async (): Promise<HeatmapDataset> => {
         return { sectors: [], asOf: '' };
     }
 
-    // Build canonical symbol list for all currently listed TWSE/TPEX securities.
-    // We deliberately exclude `emerging` (興櫃) — they're not part of the public
-    // heatmap and would just add noise.
+    // --- Primary: Fugle snapshot (TSE + OTC in 2 calls, no rate-limit risk) ---
+    try {
+        const fugleQuotes = await getFugleAllQuotes();
+        if (fugleQuotes.length >= 500) {
+            return {
+                sectors: groupBySector(buildStocksFromFugle(fugleQuotes, universe)),
+                asOf: new Date().toISOString().split('T')[0],
+            };
+        }
+        console.warn(`[tw-heatmap] Fugle returned only ${fugleQuotes.length} quotes, trying MIS`);
+    } catch (e) {
+        console.error('[tw-heatmap] Fugle fetch failed, trying MIS:', e);
+    }
+
+    // --- Secondary: TWSE MIS (chunked, TPEX included but rate-limit-prone) ---
     const allSymbols: string[] = [];
     for (const row of universe.values()) {
         if (row.type === 'twse') allSymbols.push(`${row.stock_id}.TW`);
@@ -133,8 +166,6 @@ export const getTwHeatmapDataset = cache(async (): Promise<HeatmapDataset> => {
         return buildFromDailySnapshot(universe);
     }
 
-    // If MIS rate-limited so much that almost nothing came back, prefer the
-    // daily snapshot — partial data would just look broken.
     if (quotes.length < allSymbols.length * 0.25) {
         console.warn(
             `[tw-heatmap] MIS returned ${quotes.length}/${allSymbols.length}; using daily fallback`
@@ -144,13 +175,10 @@ export const getTwHeatmapDataset = cache(async (): Promise<HeatmapDataset> => {
 
     const stocks: HeatmapStock[] = [];
     for (const q of quotes) {
-        // TradeValue ≈ accumulated lots × current price × 1000 shares/lot
         const tradeValue = q.volume * q.price * 1000;
         if (!Number.isFinite(tradeValue) || tradeValue <= 0) continue;
-
         const info = universe.get(q.stockId);
         const sector = getCustomSector(q.stockId) ?? info?.industry_category ?? '其他';
-
         stocks.push({
             id: q.stockId,
             name: q.name || info?.stock_name || q.stockId,
