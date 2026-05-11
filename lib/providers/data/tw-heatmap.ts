@@ -2,7 +2,6 @@ import 'server-only';
 import { cache } from 'react';
 import { fetchFinMind } from './finmind';
 import { getCustomSector } from '@/lib/market/tw-sector-taxonomy';
-import { getFugleAllQuotes, type FugleQuote } from './fugle';
 import {
     getTwseDailySnapshot,
     getTwseRealtimeQuotes,
@@ -140,26 +139,6 @@ function groupBySector(stocks: HeatmapStock[]): { name: string; stocks: HeatmapS
         .map(({ name, stocks }) => ({ name, stocks }));
 }
 
-function buildStocksFromFugle(
-    quotes: FugleQuote[],
-    universe: Map<string, FinMindStockInfoRow>
-): HeatmapStock[] {
-    const stocks: HeatmapStock[] = [];
-    for (const q of quotes) {
-        if (!Number.isFinite(q.tradeValue) || q.tradeValue <= 0) continue;
-        const info = universe.get(q.stockId);
-        const sector = getCustomSector(q.stockId) ?? info?.industry_category ?? '其他';
-        stocks.push({
-            id: q.stockId,
-            name: q.name || info?.stock_name || q.stockId,
-            sector,
-            value: q.tradeValue,
-            changePct: q.changePercent,
-        });
-    }
-    return stocks;
-}
-
 export const getTwHeatmapDataset = cache(async (): Promise<HeatmapDataset> => {
     let universe = new Map<string, FinMindStockInfoRow>();
     try {
@@ -169,21 +148,7 @@ export const getTwHeatmapDataset = cache(async (): Promise<HeatmapDataset> => {
         return { sectors: [], asOf: '' };
     }
 
-    // --- Primary: Fugle snapshot (TSE + OTC in 2 calls, no rate-limit risk) ---
-    try {
-        const fugleQuotes = await getFugleAllQuotes();
-        if (fugleQuotes.length >= 500) {
-            return {
-                sectors: groupBySector(buildStocksFromFugle(fugleQuotes, universe)),
-                asOf: new Date().toISOString().split('T')[0],
-            };
-        }
-        console.warn(`[tw-heatmap] Fugle returned only ${fugleQuotes.length} quotes, trying MIS`);
-    } catch (e) {
-        console.error('[tw-heatmap] Fugle fetch failed, trying MIS:', e);
-    }
-
-    // --- Secondary: TWSE MIS (chunked, TPEX included but rate-limit-prone) ---
+    // --- Primary: TWSE MIS (chunked, covers TSE + OTC) ---
     const allSymbols: string[] = [];
     for (const row of universe.values()) {
         if (row.type === 'twse') allSymbols.push(`${row.stock_id}.TW`);
