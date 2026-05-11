@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import TradingViewWidget from "@/components/TradingViewWidget";
 import TwMarketOverview from "@/components/dashboard/TwMarketOverview";
 import TwHeatmap from "@/components/dashboard/TwHeatmap";
+import TwNews from "@/components/dashboard/TwNews";
 import {
     HEATMAP_WIDGET_CONFIG,
     MARKET_DATA_WIDGET_CONFIG,
@@ -47,15 +48,8 @@ const Home = async () => {
             </section>
             <section className="grid w-full gap-8 home-section">
                 {isTw ? (
-                    // TradingView market-quotes widget renders blanks for TWSE-listed
-                    // tickers in embed mode, so collapse the row to a single full-width
-                    // Timeline (zh_TW) until a self-built quotes panel ships.
                     <div className="h-full md:col-span-2 xl:col-span-3">
-                        <TradingViewWidget
-                            scriptUrl={`${scriptUrl}timeline.js`}
-                            config={TOP_STORIES_WIDGET_CONFIG(market)}
-                            height={600}
-                        />
+                        <TwNews />
                     </div>
                 ) : (
                     <>
