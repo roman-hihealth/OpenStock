@@ -65,6 +65,81 @@ async function fetchFugleSnapshot(
         }));
 }
 
+// =============================================================================
+// Intraday quote — individual stock (Basic plan supported)
+// =============================================================================
+
+type FugleIntradayQuoteResponse = {
+    symbol?: string;
+    name?: string;
+    exchange?: string;
+    market?: string;
+    previousClose?: number;
+    closePrice?: number;
+    change?: number;
+    changePercent?: number;
+    total?: { tradeValue?: number; tradeVolume?: number };
+};
+
+export type FugleIntradayQuote = {
+    stockId: string;
+    name: string;
+    price: number;
+    previousClose: number;
+    change: number;
+    changePercent: number;
+    tradeValue: number;
+};
+
+async function fetchFugleIntradayQuote(
+    stockId: string,
+    apiKey: string
+): Promise<FugleIntradayQuote | null> {
+    const url = `${FUGLE_BASE}/intraday/quote/${stockId}`;
+    const res = await fetch(url, {
+        cache: 'force-cache',
+        next: { revalidate: 30 },
+        headers: { 'X-API-KEY': apiKey },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as FugleIntradayQuoteResponse;
+    const price = json.closePrice ?? 0;
+    if (!price) return null;
+    return {
+        stockId,
+        name: json.name ?? stockId,
+        price,
+        previousClose: json.previousClose ?? 0,
+        change: json.change ?? 0,
+        changePercent: json.changePercent ?? 0,
+        tradeValue: json.total?.tradeValue ?? 0,
+    };
+}
+
+// Fetch multiple stocks in parallel. Silently drops any that fail.
+export async function getFugleIntradayQuotes(
+    stockIds: string[]
+): Promise<Map<string, FugleIntradayQuote>> {
+    const apiKey = process.env.FUGLE_API_KEY;
+    if (!apiKey) return new Map();
+
+    const results = await Promise.allSettled(
+        stockIds.map((id) => fetchFugleIntradayQuote(id, apiKey))
+    );
+
+    const map = new Map<string, FugleIntradayQuote>();
+    results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value) {
+            map.set(stockIds[i], r.value);
+        }
+    });
+    return map;
+}
+
+// =============================================================================
+// Snapshot — full market (Developer plan required)
+// =============================================================================
+
 // Fetches all TWSE (TSE) + TPEX (OTC) stocks in 2 parallel calls.
 export async function getFugleAllQuotes(
     revalidateSeconds = FUGLE_REVALIDATE

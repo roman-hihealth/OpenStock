@@ -1,8 +1,8 @@
 import Link from 'next/link';
+import { getFugleIntradayQuotes } from '@/lib/providers/data/fugle';
 import {
     getTwseDailySnapshot,
     getTwseRealtimeQuotes,
-    type TwseQuote,
 } from '@/lib/providers/data/twse';
 import { cn } from '@/lib/utils';
 
@@ -59,33 +59,46 @@ const SECTORS: { name: string; symbols: SectorSymbol[] }[] = [
 
 export default async function TwMarketOverview() {
     const allSymbols = SECTORS.flatMap((s) => s.symbols.map((x) => x.symbol));
-    let quotes: TwseQuote[] = [];
+    const allIds = allSymbols.map((s) => s.replace(/\.TWO?$/i, ''));
+    const quoteMap = new Map<string, RowQuote>();
+
+    // Primary: Fugle intraday/quote — reliable, no z="-" issue, Basic plan OK.
     try {
-        quotes = await getTwseRealtimeQuotes(allSymbols);
+        const fugleMap = await getFugleIntradayQuotes(allIds);
+        for (const sym of allSymbols) {
+            const id = sym.replace(/\.TWO?$/i, '');
+            const q = fugleMap.get(id);
+            if (q && q.price > 0) {
+                quoteMap.set(sym, { price: q.price, changePercent: q.changePercent, isLive: true });
+            }
+        }
     } catch (e) {
-        console.error('TwMarketOverview MIS fetch failed:', e);
+        console.error('TwMarketOverview Fugle fetch failed:', e);
     }
 
-    const quoteMap = new Map<string, RowQuote>();
-    for (const q of quotes) {
-        if (q.price > 0) {
-            quoteMap.set(q.symbol, {
-                price: q.price,
-                changePercent: q.changePercent,
-                isLive: q.isLive,
-            });
+    // Fallback: MIS for any symbols Fugle didn't return.
+    if (quoteMap.size < allSymbols.length) {
+        const missing = allSymbols.filter((s) => !quoteMap.has(s));
+        try {
+            const quotes = await getTwseRealtimeQuotes(missing);
+            for (const q of quotes) {
+                if (q.price > 0) {
+                    quoteMap.set(q.symbol, { price: q.price, changePercent: q.changePercent, isLive: q.isLive });
+                }
+            }
+        } catch (e) {
+            console.error('TwMarketOverview MIS fallback failed:', e);
         }
     }
 
-    // If MIS is rate-limiting / blocking us, fill the gaps from STOCK_DAY_ALL
-    // (yesterday's close during trading hours, today's after market close).
+    // Last resort: STOCK_DAY_ALL for anything still missing.
     if (quoteMap.size < allSymbols.length) {
         try {
             const snapshot = await getTwseDailySnapshot(900);
             const byCode = new Map(snapshot.map((r) => [r.Code, r]));
             for (const sym of allSymbols) {
                 if (quoteMap.has(sym)) continue;
-                const id = sym.replace(/\.TWO?$/, '');
+                const id = sym.replace(/\.TWO?$/i, '');
                 const row = byCode.get(id);
                 if (!row) continue;
                 const close = parseFloat(row.ClosingPrice || '0');
